@@ -1,0 +1,17 @@
+included:
+  - SemanticFileExplorer
+
+excluded:
+  - SemanticFileExplorer.app
+  - build
+  - DerivedData
+
+disabled_rules:
+  - identifier_name
+  - line_length
+  - file_length
+  - type_body_length
+  - function_body_length
+
+trailing_comma:
+  mandatory_comma: true
