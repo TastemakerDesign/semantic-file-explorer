@@ -22,7 +22,7 @@ actor CLIPEncoder {
         self.tokenizer = try CLIPTokenizer(contentsOf: tokenizerURL)
     }
 
-    func encode(text: String) throws -> [Float] {
+    func encodeText(_ text: String) throws -> [Float] {
         let tokens = tokenizer.encode(text)
         let array = try MLMultiArray(shape: [1, NSNumber(value: CLIPTokenizer.contextLength)], dataType: .int32)
         for (index, token) in tokens.enumerated() {
@@ -33,10 +33,10 @@ actor CLIPEncoder {
         return Self.normalized(Self.floats(from: output))
     }
 
-    func encode(imagesAt urls: [URL]) async throws -> [[Float]?] {
+    func encodeImages(at urls: [URL]) async throws -> [[Float]?] {
         var providers: [MLFeatureProvider] = []
         var slots: [Int] = []
-        for (index, buffer) in await MediaDecoder.pixelBuffers(for: urls).enumerated() {
+        for (index, buffer) in await ImageDecoder.pixelBuffers(for: urls).enumerated() {
             guard let buffer else {
                 continue
             }
@@ -56,8 +56,8 @@ actor CLIPEncoder {
         return results
     }
 
-    func encode(videoAt url: URL, targetInterval: Double, maxFrames: Int) async throws -> [VideoKeyframe] {
-        let frames = try await MediaDecoder.frames(
+    func encodeVideo(at url: URL, targetInterval: Double, maxFrames: Int) async throws -> [VideoKeyframe] {
+        let frames = try await VideoDecoder.sampledFrames(
             of: url,
             targetInterval: targetInterval,
             maxFrames: maxFrames

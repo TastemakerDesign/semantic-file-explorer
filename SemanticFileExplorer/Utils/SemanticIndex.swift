@@ -51,7 +51,7 @@ actor SemanticIndex {
             guard !pending.isEmpty else {
                 return
             }
-            let embeddings = try await encoder.encode(imagesAt: pending.map(\.url))
+            let embeddings = try await encoder.encodeImages(at: pending.map(\.url))
             var indexed: [IndexEntry] = []
             var dropped: [String] = []
             for (file, embedding) in zip(pending, embeddings) {
@@ -90,7 +90,7 @@ actor SemanticIndex {
                 continue
             }
             try await drainImages()
-            let keyframes = (try? await encoder.encode(videoAt: file.url, targetInterval: 2, maxFrames: 240)) ?? []
+            let keyframes = (try? await encoder.encodeVideo(at: file.url, targetInterval: 2, maxFrames: 240)) ?? []
             guard !keyframes.isEmpty else {
                 try commit([], dropping: [file.relativePath])
                 completed += 1

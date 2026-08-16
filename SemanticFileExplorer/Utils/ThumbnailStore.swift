@@ -123,13 +123,13 @@ final class ThumbnailStore {
         let image: CGImage?
         if contentType.conforms(to: .movie) {
             let seconds = time.map { max(0, $0 - keyframeLead) } ?? videoFrameTime
-            image = await MediaDecoder.frame(
+            image = await VideoDecoder.thumbnailFrame(
                 of: url,
                 after: seconds,
                 maxSize: CGSize(width: renderPixelSize, height: renderPixelSize)
             )
         } else if contentType.conforms(to: .image) {
-            image = MediaDecoder.image(at: url, maxPixelSize: renderPixelSize)
+            image = ImageDecoder.image(at: url, maxPixelSize: renderPixelSize)
         } else {
             return nil
         }

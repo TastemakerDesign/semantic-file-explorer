@@ -226,7 +226,7 @@ final class SearchEngine {
             )
             do {
                 let encoder = try await loadedEncoder()
-                let embedding = try await encoder.encode(text: trimmed)
+                let embedding = try await encoder.encodeText(trimmed)
                 let visual = await index.search(embedding, filter: filter, limit: 300, minimumScore: 0.05)
                 guard !Task.isCancelled else {
                     return
