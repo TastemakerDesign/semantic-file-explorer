@@ -7,32 +7,32 @@ nonisolated enum ImageDecoder {
     static let inputSide = 256
     static let processorCount = ProcessInfo.processInfo.activeProcessorCount
 
-    private struct DecodedImage: @unchecked Sendable {
+    private struct SlottedImage: Sendable {
         let index: Int
-        let buffer: CVPixelBuffer?
+        let image: DecodedImage
     }
 
-    static func pixelBuffers(for urls: [URL]) async -> [CVPixelBuffer?] {
+    static func decodedImages(for urls: [URL]) async -> [DecodedImage] {
         guard urls.count > 1 else {
-            return urls.map { pixelBuffer(forImageAt: $0) }
+            return urls.map { DecodedImage(buffer: pixelBuffer(forImageAt: $0)) }
         }
-        return await withTaskGroup(of: DecodedImage.self) { group in
-            var results = [CVPixelBuffer?](repeating: nil, count: urls.count)
+        return await withTaskGroup(of: SlottedImage.self) { group in
+            var results = [DecodedImage](repeating: DecodedImage(buffer: nil), count: urls.count)
             var next = 0
             while next < min(processorCount, urls.count) {
                 let index = next
                 let url = urls[index]
-                group.addTask { DecodedImage(index: index, buffer: pixelBuffer(forImageAt: url)) }
+                group.addTask { SlottedImage(index: index, image: DecodedImage(buffer: pixelBuffer(forImageAt: url))) }
                 next += 1
             }
             for await decoded in group {
-                results[decoded.index] = decoded.buffer
+                results[decoded.index] = decoded.image
                 guard next < urls.count else {
                     continue
                 }
                 let index = next
                 let url = urls[index]
-                group.addTask { DecodedImage(index: index, buffer: pixelBuffer(forImageAt: url)) }
+                group.addTask { SlottedImage(index: index, image: DecodedImage(buffer: pixelBuffer(forImageAt: url))) }
                 next += 1
             }
             return results
@@ -100,4 +100,8 @@ nonisolated enum ImageDecoder {
         ))
         return buffer
     }
+}
+
+nonisolated struct DecodedImage: @unchecked Sendable {
+    let buffer: CVPixelBuffer?
 }

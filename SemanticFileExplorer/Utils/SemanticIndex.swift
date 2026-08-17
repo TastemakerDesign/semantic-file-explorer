@@ -24,6 +24,9 @@ actor SemanticIndex {
         return database
     }
 
+    private static let videoFrameInterval: Double = 2
+    private static let videoFrameLimit = 240
+
     func build(
         using encoder: CLIPEncoder,
         batchSize: Int,
@@ -38,78 +41,139 @@ actor SemanticIndex {
         let scanned = Set(files.map(\.relativePath))
         try database.removeFiles(notIn: scanned)
         entries = entries.filter { scanned.contains($0.key) }
-        var pending: [ScannedFile] = []
-        var completed = 0
-        func commit(_ indexed: [IndexEntry], dropping dropped: [String]) throws {
-            try database.save(indexed)
-            try database.remove(dropped)
-            for entry in indexed { entries[entry.relativePath] = entry }
-            for path in dropped { entries[path] = nil }
+        let stale = files.filter { file in
+            guard let existing = entries[file.relativePath] else {
+                return true
+            }
+            return existing.size != file.size || existing.modificationDate != file.modificationDate
         }
+        var completed = files.count - stale.count
+        progress(completed, files.count)
 
-        func drainImages() async throws {
-            guard !pending.isEmpty else {
-                return
+        // Decoding (ImageIO/AVFoundation, CPU bound) and inference (Core ML, mostly
+        // ANE bound) are the two halves of the work, so the group keeps exactly one
+        // unit decoding ahead while the current one runs through the model.
+        let units = Self.workUnits(for: stale, batchSize: batchSize)
+        try await withThrowingTaskGroup(of: DecodedUnit.self) { group in
+            var next = 0
+            if let first = units.first {
+                next = 1
+                group.addTask { await Self.decode(first) }
             }
-            let embeddings = try await encoder.encodeImages(at: pending.map(\.url))
-            var indexed: [IndexEntry] = []
-            var dropped: [String] = []
-            for (file, embedding) in zip(pending, embeddings) {
-                guard let embedding else {
-                    dropped.append(file.relativePath)
-                    continue
+            while let decoded = try await group.next() {
+                if next < units.count {
+                    let unit = units[next]
+                    next += 1
+                    group.addTask { await Self.decode(unit) }
                 }
-                indexed.append(IndexEntry(
-                    relativePath: file.relativePath,
-                    modificationDate: file.modificationDate,
-                    size: file.size,
-                    isVideo: false,
-                    embeddings: [embedding],
-                    timestamps: [0]
-                ))
+                try Task.checkCancellation()
+                switch decoded {
+                case .images(let batch, let images):
+                    try await indexImageBatch(batch, images: images, using: encoder)
+                    completed += batch.count
+                case .video(let file, let frames):
+                    try await indexVideo(file, frames: frames, using: encoder)
+                    completed += 1
+                }
+                progress(completed, files.count)
             }
-            try commit(indexed, dropping: dropped)
-            completed += pending.count
-            progress(completed, files.count)
-            pending.removeAll(keepingCapacity: true)
         }
+    }
+
+    private enum WorkUnit: Sendable {
+        case images([ScannedFile])
+        case video(ScannedFile)
+    }
+
+    private enum DecodedUnit: Sendable {
+        case images([ScannedFile], [DecodedImage])
+        case video(ScannedFile, [DecodedVideoFrame])
+    }
+
+    /// Splits the files needing work into units of one Core ML batch each, keeping
+    /// them in size order so the cheapest files are indexed first.
+    private static func workUnits(for files: [ScannedFile], batchSize: Int) -> [WorkUnit] {
+        var units: [WorkUnit] = []
+        var batch: [ScannedFile] = []
         for file in files {
-            try Task.checkCancellation()
-            if let existing = entries[file.relativePath],
-               existing.size == file.size,
-               existing.modificationDate == file.modificationDate {
-                completed += 1
-                progress(completed, files.count)
-                continue
-            }
             guard file.isVideo else {
-                pending.append(file)
-                if pending.count >= batchSize {
-                    try await drainImages()
+                batch.append(file)
+                if batch.count >= batchSize {
+                    units.append(.images(batch))
+                    batch.removeAll(keepingCapacity: true)
                 }
                 continue
             }
-            try await drainImages()
-            let keyframes = (try? await encoder.encodeVideo(at: file.url, targetInterval: 2, maxFrames: 240)) ?? []
-            guard !keyframes.isEmpty else {
-                try commit([], dropping: [file.relativePath])
-                completed += 1
-                progress(completed, files.count)
+            if !batch.isEmpty {
+                units.append(.images(batch))
+                batch.removeAll(keepingCapacity: true)
+            }
+            units.append(.video(file))
+        }
+        if !batch.isEmpty {
+            units.append(.images(batch))
+        }
+        return units
+    }
+
+    private static func decode(_ unit: WorkUnit) async -> DecodedUnit {
+        switch unit {
+        case .images(let batch):
+            return .images(batch, await ImageDecoder.decodedImages(for: batch.map(\.url)))
+        case .video(let file):
+            let frames = try? await VideoDecoder.sampledFrames(
+                of: file.url,
+                targetInterval: videoFrameInterval,
+                maxFrames: videoFrameLimit
+            )
+            return .video(file, frames ?? [])
+        }
+    }
+
+    private func indexImageBatch(_ batch: [ScannedFile], images: [DecodedImage], using encoder: CLIPEncoder) async throws {
+        let embeddings = try await encoder.encodeImages(images)
+        var indexed: [IndexEntry] = []
+        var dropped: [String] = []
+        for (file, embedding) in zip(batch, embeddings) {
+            guard let embedding else {
+                dropped.append(file.relativePath)
                 continue
             }
-            let entry = IndexEntry(
+            indexed.append(IndexEntry(
                 relativePath: file.relativePath,
                 modificationDate: file.modificationDate,
                 size: file.size,
-                isVideo: true,
-                embeddings: keyframes.map(\.embedding),
-                timestamps: keyframes.map(\.time)
-            )
-            try commit([entry], dropping: [])
-            completed += 1
-            progress(completed, files.count)
+                isVideo: false,
+                embeddings: [embedding],
+                timestamps: [0]
+            ))
         }
-        try await drainImages()
+        try commit(indexed, dropping: dropped)
+    }
+
+    private func indexVideo(_ file: ScannedFile, frames: [DecodedVideoFrame], using encoder: CLIPEncoder) async throws {
+        let keyframes = (try? await encoder.encodeFrames(frames)) ?? []
+        guard !keyframes.isEmpty else {
+            try commit([], dropping: [file.relativePath])
+            return
+        }
+        let entry = IndexEntry(
+            relativePath: file.relativePath,
+            modificationDate: file.modificationDate,
+            size: file.size,
+            isVideo: true,
+            embeddings: keyframes.map(\.embedding),
+            timestamps: keyframes.map(\.time)
+        )
+        try commit([entry], dropping: [])
+    }
+
+    private func commit(_ indexed: [IndexEntry], dropping dropped: [String]) throws {
+        let database = try openedDatabase()
+        try database.save(indexed)
+        try database.remove(dropped)
+        for entry in indexed { entries[entry.relativePath] = entry }
+        for path in dropped { entries[path] = nil }
     }
 
     private static let momentLimit = 5

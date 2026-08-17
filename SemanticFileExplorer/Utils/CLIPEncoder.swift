@@ -33,11 +33,11 @@ actor CLIPEncoder {
         return Self.normalized(Self.floats(from: output))
     }
 
-    func encodeImages(at urls: [URL]) async throws -> [[Float]?] {
+    func encodeImages(_ images: [DecodedImage]) throws -> [[Float]?] {
         var providers: [MLFeatureProvider] = []
         var slots: [Int] = []
-        for (index, buffer) in await ImageDecoder.pixelBuffers(for: urls).enumerated() {
-            guard let buffer else {
+        for (index, image) in images.enumerated() {
+            guard let buffer = image.buffer else {
                 continue
             }
             providers.append(try MLDictionaryFeatureProvider(
@@ -46,22 +46,17 @@ actor CLIPEncoder {
             slots.append(index)
         }
         guard !providers.isEmpty else {
-            return Array(repeating: nil, count: urls.count)
+            return Array(repeating: nil, count: images.count)
         }
         let outputs = try imageModel.predictions(fromBatch: MLArrayBatchProvider(array: providers))
-        var results = [[Float]?](repeating: nil, count: urls.count)
+        var results = [[Float]?](repeating: nil, count: images.count)
         for position in 0..<outputs.count {
             results[slots[position]] = Self.normalized(Self.floats(from: outputs.features(at: position)))
         }
         return results
     }
 
-    func encodeVideo(at url: URL, targetInterval: Double, maxFrames: Int) async throws -> [VideoKeyframe] {
-        let frames = try await VideoDecoder.sampledFrames(
-            of: url,
-            targetInterval: targetInterval,
-            maxFrames: maxFrames
-        )
+    func encodeFrames(_ frames: [DecodedVideoFrame]) throws -> [VideoKeyframe] {
         guard !frames.isEmpty else {
             return []
         }
