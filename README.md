@@ -2,7 +2,7 @@
 
 Semantic File Explorer is a local-first photo and video search engine for macOS.
 
-MobileCLIP models are licensed according to https://github.com/apple/ml-mobileclip.
+MobileCLIP models are licensed according to https://github.com/apple/ml-mobileclip. They can be found at https://huggingface.co/apple/coreml-mobileclip. Place `mobileclip_s2_image.mlpackage` and `mobileclip_s2_text.mlpackage` in the `Resources` folder.
 
 # Development
 
