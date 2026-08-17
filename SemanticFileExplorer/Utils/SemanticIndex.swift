@@ -49,10 +49,6 @@ actor SemanticIndex {
         }
         var completed = files.count - stale.count
         progress(completed, files.count)
-
-        // Decoding (ImageIO/AVFoundation, CPU bound) and inference (Core ML, mostly
-        // ANE bound) are the two halves of the work, so the group keeps exactly one
-        // unit decoding ahead while the current one runs through the model.
         let units = Self.workUnits(for: stale, batchSize: batchSize)
         try await withThrowingTaskGroup(of: DecodedUnit.self) { group in
             var next = 0
@@ -90,8 +86,6 @@ actor SemanticIndex {
         case video(ScannedFile, [DecodedVideoFrame])
     }
 
-    /// Splits the files needing work into units of one Core ML batch each, keeping
-    /// them in size order so the cheapest files are indexed first.
     private static func workUnits(for files: [ScannedFile], batchSize: Int) -> [WorkUnit] {
         var units: [WorkUnit] = []
         var batch: [ScannedFile] = []
