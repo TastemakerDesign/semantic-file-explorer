@@ -8,10 +8,10 @@ MobileCLIP models are licensed according to https://github.com/apple/ml-mobilecl
 
 Semantic File Explorer is built with SwiftUI for macOS.
 
-If you find a bug or want to request a feature, create a GitHub issue at TODO.
+If you find a bug or want to request a feature, create a GitHub issue at https://github.com/TastemakerDesign/semantic-file-explorer/issues.
 
 # Links
 
-- Demo Video - TODO
+- Demo Video - https://www.youtube.com/watch?v=DVvYIrxFyZk
 
 - Tastemaker Design - https://tastemaker.design/
